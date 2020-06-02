@@ -13,11 +13,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 class FileLRUCache(AbstractLRUCache):
-    def __init__(self, base_path, levels, 
-            load_max_files, load_interval, 
-            *args, **kwargs):
+    def __init__(self, base_path, levels,
+                 load_max_files, load_interval,
+                 *args, **kwargs):
         AbstractLRUCache.__init__(self, *args, **kwargs)
-        self._temp_file_prefix = "tempfile"
+        self._temp_file_prefix = "temp-file"
         self._base_path = base_path
         self._levels = self._generate_levels(levels)
         self._load_max_files = load_max_files
@@ -34,13 +34,12 @@ class FileLRUCache(AbstractLRUCache):
             dir_names.append(key)
         return os.path.join(self._base_path, *dir_names)
 
-    def _generate_levels(self, levels):
+    @staticmethod
+    def _generate_levels(levels):
         levels = levels.split(":")
         if len(levels) > 3:
             levels = levels[:3]
         try:
-            if len(levels) < 1:
-                raise ValueError
             levels = map(int, levels)
             for level in levels:
                 if level > 2:
@@ -49,19 +48,22 @@ class FileLRUCache(AbstractLRUCache):
             levels = [1, 2]
         return levels
 
-    def _safe_remove_dir(self, path):
+    @staticmethod
+    def safe_remove_dir(path):
         try:
             shutil.rmtree(path)
         except (IOError, OSError):
-            LOGGER.error("fail to remove %s" % path, exc_info=True)
+            LOGGER.error("fail to remove %s", path, exc_info=True)
 
-    def _safe_remove_file(self, path):
+    @staticmethod
+    def safe_remove_file(path):
         try:
             os.remove(path)
         except (IOError, OSError):
-            LOGGER.error("fail to remove %s" % path, exc_info=True)
+            LOGGER.error("fail to remove %s", path, exc_info=True)
 
-    def _is_valid_dir_name(self, name, length):
+    @staticmethod
+    def is_valid_dir_name(name, length):
         if len(name) != length:
             return False
         for char in name:
@@ -78,11 +80,11 @@ class FileLRUCache(AbstractLRUCache):
             for name in os.listdir(base_directory):
                 path = os.path.join(base_directory, name)
                 if os.path.isfile(path):
-                    self._safe_remove_file(path)
+                    self.safe_remove_file(path)
                     continue
-                if not self._is_valid_dir_name(
+                if not self.is_valid_dir_name(
                         name, self._levels[level-1]):
-                    self._safe_remove_dir(path)
+                    self.safe_remove_dir(path)
                     continue
                 for file_path, name, size in \
                         self._walk(path, level+1, max_levels):
@@ -91,18 +93,18 @@ class FileLRUCache(AbstractLRUCache):
             for name in os.listdir(base_directory):
                 path = os.path.join(base_directory, name)
                 if os.path.isdir(path):
-                    self._safe_remove_dir(path)
+                    self.safe_remove_dir(path)
                     continue
                 if name.startswith(self._temp_file_prefix):
-                    self._safe_remove_file(path)
+                    self.safe_remove_file(path)
                     continue
                 if self._generate_path(name) != path:
-                    self._safe_remove_file(path)
+                    self.safe_remove_file(path)
                     continue
                 try:
                     size = os.stat(path).st_size
                 except (IOError, OSError):
-                    LOGGER.error("fail to stat %s" % path)
+                    LOGGER.error("fail to stat %s", path, exc_info=True)
                     continue
                 yield path, name, size
 
@@ -114,14 +116,16 @@ class FileLRUCache(AbstractLRUCache):
         for file_path, name, size in \
                 self._walk(self._base_path, 1, len(self._levels)):
             if self.add_meta(name, size):
-                LOGGER.debug("add meta for %s" % name)
+                LOGGER.debug("add meta for %s", name)
             else:
-                LOGGER.debug("fail to add meta for %s" % name)
-                self._safe_remove_file(file_path)
+                LOGGER.debug("fail to add meta for %s", name)
+                self.safe_remove_file(file_path)
             count = count + 1
             if count >= self._load_max_files:
-                LOGGER.debug("load_max_files reached, "
-                    "wait for %fs" % self._load_interval)
+                LOGGER.debug(
+                    "load_max_files reached, "
+                    "wait for %fs",
+                    self._load_interval)
                 yield self._load_interval
                 count = 0
 
@@ -131,10 +135,11 @@ class FileLRUCache(AbstractLRUCache):
             LOGGER.error(message)
             raise RuntimeError(message) 
 
-        LOGGER.debug("write cache for %s" % key)
+        LOGGER.debug("write cache for %s", key)
         dir_part = self._generate_path(key, True)
         path = os.path.join(dir_part, key)
-        temp_path = os.path.join(dir_part,
+        temp_path = os.path.join(
+            dir_part,
             "%s-%s-%s" % (self._temp_file_prefix, 
                           key,
                           uuid.uuid1().hex))
@@ -168,7 +173,7 @@ class FileLRUCache(AbstractLRUCache):
             with open(path) as fd:
                 return fd.read()
         except (IOError, OSError):
-            LOGGER.error("fail to read %s" % path, exc_info=True)
+            LOGGER.error("fail to read %s", path, exc_info=True)
         raise KeyError(key)
 
     def delete_cache(self, key):
@@ -185,11 +190,14 @@ class FileLRUCache(AbstractLRUCache):
             LOGGER.error("permission denied for %s" % path)
             return
 
-        self._safe_remove_file(path)
+        self.safe_remove_file(path)
 
     def _is_valid_key(self, key):
         if isinstance(key, unicode):
-            key = key.encode()
+            try:
+                key = key.encode()
+            except UnicodeEncodeError:
+                return False
         if not isinstance(key, str):
             return False
         if not key.isalnum():
@@ -269,36 +277,37 @@ class FileLRUCacheBuilder(object):
         self._expire_interval = expire_interval
         return self
 
-    def with_forced_expire_interval(self, 
+    def with_forced_expire_interval(
+            self,
             forced_expire_interval):
         self._forced_expire_interval = \
             forced_expire_interval
         return self
 
     def build(self):
-        if self._base_path == None:
+        if self._base_path is None:
             raise RuntimeError("missing base_path")
-        if self._levels == None:
+        if self._levels is None:
             raise RuntimeError("missing levels")
-        if self._load_max_files == None:
+        if self._load_max_files is None:
             raise RuntimeError("missing load_max_files")
-        if self._load_interval == None:
+        if self._load_interval is None:
             raise RuntimeError("missing load_interval")
-        if self._max_entry_count == None:
+        if self._max_entry_count is None:
             raise RuntimeError("missing max_entry_count")
-        if self._max_size == None:
+        if self._max_size is None:
             raise RuntimeError("missing max_size")
-        if self._min_uses == None:
+        if self._min_uses is None:
             raise RuntimeError("missing min_uses")
-        if self._max_inactive == None:
+        if self._max_inactive is None:
             raise RuntimeError("missing max_inactive")
-        if self._lock_age == None:
+        if self._lock_age is None:
             raise RuntimeError("missing lock_age")
-        if self._wait_count == None:
+        if self._wait_count is None:
             raise RuntimeError("missing wait_count")
-        if self._expire_interval == None:
+        if self._expire_interval is None:
             raise RuntimeError("missing expire_interval")
-        if self._forced_expire_interval == None:
+        if self._forced_expire_interval is None:
             raise RuntimeError("missing forced_expire_interval")
 
         return FileLRUCache(
@@ -315,4 +324,3 @@ class FileLRUCacheBuilder(object):
             self._wait_count,
             self._expire_interval,
             self._forced_expire_interval)
-

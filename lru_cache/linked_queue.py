@@ -2,8 +2,10 @@
 
 
 class Node(object):
-    def __init__(self, data=None,
-                 prev=None, next=None):
+    def __init__(self,
+                 data=None,
+                 prev=None,
+                 next=None):
         self._data = data
         self._prev = prev
         self._next = next
@@ -116,6 +118,7 @@ class LinkedQueue(object):
     def size(self):
         return self._size
 
+
 def test_linked_queue():
     lq = LinkedQueue()
     assert list(lq.iter()) == [] and lq.size == 0
@@ -139,11 +142,11 @@ def test_linked_queue():
     assert lq.remove_last().data == 2
     assert lq.remove_last().data == 1
     assert lq.remove_last().data == 3
-    assert lq.remove_last() == None
+    assert lq.remove_last() is None
     assert lq.size == 0
 
     print("all tests passed")
 
+
 if __name__ == "__main__":
     test_linked_queue()
-

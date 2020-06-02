@@ -106,14 +106,14 @@ class Entry(object):
         self._waiters.append(waiter)
         lock.release()
 
-        if timeout == None or timeout < 0:
+        if timeout is None or timeout < 0:
             waiter.acquire()
             lock.acquire()
-            return self._status & self.UPDATED \
+            return self._status & EntryStatus.UPDATED \
                 and True or False
 
         end_time = time.time() + timeout
-        delay = 0.0005 # 500 us -> initial delay of 1 ms
+        delay = 0.0005  # 500 us -> initial delay of 1 ms
         while True:
             gotit = waiter.acquire(0)
             if gotit:
@@ -148,4 +148,3 @@ class Entry(object):
     def is_unusable(self):
         return self._status & EntryStatus.DELETING or \
             self._status & EntryStatus.DELETED
-

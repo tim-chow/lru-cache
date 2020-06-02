@@ -1,28 +1,28 @@
 import logging
 import time
 import threading
-import sys
 
 from lru_cache.abstract_lru_cache import (
     Serializer,
     AbstractLRUCache,
-    ProxyCache)
+    ProxyCache,
+    CacheError)
 
 LOGGER = logging.getLogger(__name__)
 
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s %(threadName)s "
-        "%(filename)s:%(lineno)d %(message)s",
-    datefmt="%F %T")
+           "%(filename)s:%(lineno)d %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S")
 
-THREAD_COUNT = 10
+THREAD_COUNT = 100
 LOOP_COUNT = 15000
-CACHE_COUNT = 10
-GROUP_COUNT = 10
+CACHE_COUNT = 5
+GROUP_COUNT = 20
 
 
-class Serializer(Serializer):
+class TestSerializer(Serializer):
     def loads(self, data):
         return data
 
@@ -52,14 +52,15 @@ class MemoryLRUCache(AbstractLRUCache):
     def delete_cache(self, key):
         self._d.pop(key, None)
 
+
 proxy_cache = ProxyCache()
-proxy_cache.set_serializer(Serializer())
+proxy_cache.set_serializer(TestSerializer())
 proxy_cache.set_call_func_when_failure(False)
 proxy_cache.set_key_func(lambda _, key, *a, **kw: key)
 
-for ind in range(CACHE_COUNT):
+for cache_id in range(CACHE_COUNT):
     cache = MemoryLRUCache(
-        name="memory-cache-%d" % ind,
+        name="memory-cache-%d" % cache_id,
         max_entry_count=10000,
         max_size=10*1024*1024*1024,
         max_inactive=3600,
@@ -72,17 +73,21 @@ for ind in range(CACHE_COUNT):
     cache.wait_for_usable()
     proxy_cache.add_cache(cache)
 
+
 @proxy_cache.deco
 def func(key):
     return key
+
 
 def target(k):
     for _ in range(LOOP_COUNT):
         try:
             func(k)
-        except:
-            LOGGER.error("fail to call func",
+        except CacheError:
+            LOGGER.error(
+                "fail to call func",
                 exc_info=True)
+
 
 def test(thread_count):
     threads = []
@@ -96,9 +101,10 @@ def test(thread_count):
     for thread in threads:
         thread.join()
     time_used = time.time() - start_time
-    LOGGER.debug("use %.3fs" % time_used)
-    LOGGER.debug("average: %fr/s" %
-        (THREAD_COUNT*LOOP_COUNT/time_used))
+    LOGGER.debug("use %.3fs", time_used)
+    LOGGER.debug("average: %fr/s",
+                 (THREAD_COUNT*LOOP_COUNT/time_used))
+
 
 if __name__ == "__main__":
     try:
@@ -106,4 +112,3 @@ if __name__ == "__main__":
     finally:
         for cache in proxy_cache.caches:
             cache.stop()
-

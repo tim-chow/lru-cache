@@ -19,12 +19,13 @@ if not os.path.isdir(BASE_DIR):
     sys.exit("please make sure BASE_DIR exists")
 
 
-class Serializer(Serializer):
+class TestSerializer(Serializer):
     def loads(self, data):
         return data
 
     def dumps(self, obj):
         return len(obj), obj
+
 
 def test():
     flc = FileLRUCacheBuilder() \
@@ -41,31 +42,32 @@ def test():
     proxy_cache.set_key_func(
         lambda _, key, *a, **kw: key)
     proxy_cache.set_call_func_when_failure(False)
-    proxy_cache.set_serializer(Serializer())
+    proxy_cache.set_serializer(TestSerializer())
 
     @proxy_cache.deco
-    def f(k):
-        return k
+    def f(key):
+        return key
 
     try:
         k = "thisisavalidkey"
         for _ in range(2):
             ret = f(k)
-            LOGGER.info("ret = [[%s]]" % ret)
+            LOGGER.info("ret = [[%s]]", ret)
         for cache in proxy_cache.caches:
             ret = cache.purge(k)
-            LOGGER.info("purge result = [[%s]]"
-                % (ret & ReturnCode.OK and True or False))
+            LOGGER.info(
+                "purge result = [[%s]]",
+                (ret & ReturnCode.OK and True or False))
     finally:
         for cache in proxy_cache.caches:
             cache.stop()
+
 
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s %(threadName)s "
-            "%(filename)s:%(lineno)d %(message)s",
-        datefmt="%F %T")
+               "%(filename)s:%(lineno)d %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S")
 
     test()
-

@@ -6,6 +6,7 @@ import threading
 import time
 import sys
 import hashlib
+import functools
 
 from .abstract_cache import AbstractCache
 from .skiplist_map import SkipListMap
@@ -55,13 +56,14 @@ class ProxyCache(object):
     def deco(self, func):
         if len(self._caches) == 0:
             raise RuntimeError("empty cache")
-        if self._key_func == None:
+        if self._key_func is None:
             raise RuntimeError("missing key_func")
-        if self._call_func_when_failure == None:
+        if self._call_func_when_failure is None:
             raise RuntimeError("missing call_func_when_failure")
-        if self._serializer == None:
+        if self._serializer is None:
             raise RuntimeError("missing serializer")
 
+        @functools.wraps(func)
         def _inner(*args, **kwargs):
             key = self._key_func(func, *args, **kwargs)
             if isinstance(key, unicode):
@@ -72,11 +74,11 @@ class ProxyCache(object):
             elif isinstance(key, (int, long)):
                 index = key % len(self._caches)
             else:
-                raise TypeError("expected str or int")
+                raise TypeError("str or int expected")
             cache = self._caches[index]
             return cache.open(key, self._serializer,
-                self._call_func_when_failure, func,
-                *args, **kwargs)
+                              self._call_func_when_failure, func,
+                              *args, **kwargs)
         return _inner
 
 
@@ -92,13 +94,13 @@ class ReturnCode(object):
 
 
 class CacheError(Exception):
-    def __init__(self, code, *args, **kwargs):
-        Exception.__init__(self, *args, **kwargs)
+    def __init__(self, code, *args):
+        Exception.__init__(self, *args)
         self._code = code
 
     @property
     def code(self):
-        return _code
+        return self._code
 
 
 class AbstractLRUCache(AbstractCache):
@@ -123,7 +125,8 @@ class AbstractLRUCache(AbstractCache):
         self._expire_interval = expire_interval
         self._forced_expire_interval = forced_expire_interval
 
-    def _now(self):
+    @staticmethod
+    def _now():
         return time.time()
 
     def _is_full(self):
@@ -157,8 +160,9 @@ class AbstractLRUCache(AbstractCache):
         try:
             cached_data = self.read_cache(key)
         except KeyError:
-            LOGGER.error("meta of %s is " % key + 
-                "in LRU cache, but the data is missing, " + 
+            LOGGER.error(
+                "meta of %s is " % key +
+                "in LRU cache, but cached data is missing, " +
                 "so purge it")
             should_purge = True
         except:
@@ -176,7 +180,7 @@ class AbstractLRUCache(AbstractCache):
                     entry.ref_count == 0:
                 self._delete_node_and_cache(node)
 
-        if exc_info != None:
+        if exc_info is not None:
             raise exc_info[0], exc_info[1], exc_info[2]
         if should_purge:
             return func(*args, **kwargs)
@@ -222,7 +226,7 @@ class AbstractLRUCache(AbstractCache):
         assert isinstance(serializer, Serializer)
 
         if not self.is_usable():
-            LOGGER.debug("%s is not usable yet" % self.name)
+            LOGGER.debug("%s is not usable yet", self.name)
             cached_data = None
             try:
                 cached_data = self.read_cache(key)
@@ -282,18 +286,19 @@ class AbstractLRUCache(AbstractCache):
 
         for _ in range(self._wait_count):
             if entry.is_updating():
-                LOGGER.debug("%s is updating, " % entry.key + 
+                LOGGER.debug(
+                    "%s is updating, " % str(entry.key) +
                     "wait for it is usable")
-                gotit = entry.wait_for_usable(
+                got_it = entry.wait_for_usable(
                     self._lock,
                     self._lock_age)
-                if gotit:
+                if got_it:
                     return ReturnCode.OK
                 if entry.mark_as_updating():
                     return ReturnCode.RESPONSIBLE_FOR_UPDATING
         else:
-            LOGGER.debug("wait count is reached " + 
-                "for %s" % entry.key)
+            LOGGER.debug("wait count is reached for %s",
+                         entry.key)
             entry.decr_ref_count()
             if entry.is_deleting():
                 if entry.ref_count == 0:
@@ -328,7 +333,7 @@ class AbstractLRUCache(AbstractCache):
             sentinel = None
             while True:
                 node = self._queue.peek_last()
-                if node == None:
+                if node is None:
                     break
                 if node is sentinel:
                     break
@@ -337,17 +342,19 @@ class AbstractLRUCache(AbstractCache):
                 if entry.expire > now:
                     break
                 if entry.ref_count == 0:
-                    LOGGER.debug("%s is expired" % entry.key)
+                    LOGGER.debug("%s is expired", entry.key)
                     self._delete_node_and_cache(node)
                     sentinel = None
                     continue
 
-                LOGGER.debug("%s is referenced " % key +
-                    "by other threads, move it to the " + 
-                    "head of lru queue")
+                LOGGER.debug(
+                    "%s is referenced "
+                    "by other threads, move it to the "
+                    "head of lru queue",
+                    entry)
                 entry.expire = now + self._max_inactive
                 self._queue.move_to_head(node)
-                if sentinel == None:
+                if sentinel is None:
                     sentinel = node
         finally:
             self._lock.release()
@@ -358,7 +365,7 @@ class AbstractLRUCache(AbstractCache):
         try:
             while True:
                 node = self._queue.peek_last()
-                if node == None:
+                if node is None:
                     break
                 if node is sentinel:
                     break
@@ -370,7 +377,7 @@ class AbstractLRUCache(AbstractCache):
                 entry.expire = self._now() + self._max_inactive
                 self._queue.move_to_head(node)
 
-                if sentinel == None:
+                if sentinel is None:
                     sentinel = node
 
                 if tries <= 0:
@@ -385,12 +392,14 @@ class AbstractLRUCache(AbstractCache):
     def _delete_node_and_cache(self, node):
         entry = node.data
         if entry.ref_count > 0:
-            LOGGER.error("the referenced count "
+            LOGGER.error(
+                "the referenced count "
                 "of entry must be zero when "
                 "calling this method")
             return
         if not entry.mark_as_deleting_if_necessary():
-            LOGGER.error("current status can not "
+            LOGGER.error(
+                "current status can not "
                 "be transmitted to DELETING")
             return
         entry.incr_ref_count()
@@ -452,14 +461,7 @@ class AbstractLRUCache(AbstractCache):
             if entry.is_updating():
                 return ReturnCode.ERROR_KEY_UPDATING
 
-            if entry.is_created():
-                assert entry.ref_count == 0
-                del self._map[key]
-                self._queue.remove(node)
-                return ReturnCode.OK
-
             entry.mark_as_deleting()
             if entry.ref_count == 0:
                 self._delete_node_and_cache(node)
             return ReturnCode.OK
-
